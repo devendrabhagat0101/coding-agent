@@ -220,16 +220,33 @@ def _generate_and_write_files(
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         if ext in SUPPORTED_FORMATS and ext not in TEXT_EXTS:
-            # Binary format — use write_document (it calls Ollama internally)
-            console.print(f"[dim]Generating [cyan]{fname}[/] …[/]")
+            # Binary format — use write_document with the CODER model for
+            # reliable JSON plan generation (llama3:8b often returns invalid JSON)
+            from .config import CODER_MODEL
+            from .engine import CodingEngine as _CE
+            coder = _CE(model=CODER_MODEL)
+
+            # Build a clear instruction so the coder model knows what to produce
+            if source_context:
+                instruction = (
+                    f"Create a {ext.lstrip('.').upper()} presentation based on the "
+                    f"following document content. Use the document sections as slides.\n\n"
+                    f"{source_context[:4000]}"
+                )
+            else:
+                instruction = user_input
+
+            console.print(
+                f"[dim]Generating [cyan]{fname}[/] using [cyan]{CODER_MODEL}[/] …[/]"
+            )
             try:
                 from rich.progress import Progress, SpinnerColumn, TextColumn
                 with Progress(SpinnerColumn(), TextColumn(f"[cyan]{fname}[/]"), transient=True) as prog:
                     prog.add_task("")
                     result = write_document(
-                        instruction=user_input,
+                        instruction=instruction,
                         output=out_path,
-                        engine=engine,
+                        engine=coder,
                         context=source_context,
                     )
                 size = result.stat().st_size
@@ -342,15 +359,18 @@ def _write_detected_files(
 
         if ext in SUPPORTED_FORMATS and ext not in TEXT_EXTS:
             # Binary format (pptx, xlsx, pdf, docx) — use write_document
-            # Treat the detected content as context, not as instruction,
-            # so the LLM gets a clean natural-language instruction.
-            console.print(f"[dim]Generating [cyan]{fname}[/] via document writer …[/]")
+            # Always use the CODER model for reliable JSON plan generation.
+            from .config import CODER_MODEL
+            from .engine import CodingEngine as _CE2
+            coder = _CE2(model=CODER_MODEL)
+
             is_xml = content.strip().startswith("<")
             instruction = (
-                f"Create a well-structured {ext.lstrip('.')} file named '{fname}'."
+                f"Create a well-structured {ext.lstrip('.').upper()} file named '{fname}'."
                 if is_xml
-                else f"Create a {ext.lstrip('.')} file named '{fname}' with this content:\n\n{content}"
+                else f"Create a {ext.lstrip('.').upper()} file named '{fname}' with this content:\n\n{content}"
             )
+            console.print(f"[dim]Generating [cyan]{fname}[/] using [cyan]{CODER_MODEL}[/] …[/]")
             try:
                 from rich.progress import Progress, SpinnerColumn, TextColumn
                 with Progress(SpinnerColumn(), TextColumn(f"[cyan]{fname}[/]"), transient=True) as prog:
@@ -358,7 +378,7 @@ def _write_detected_files(
                     result = write_document(
                         instruction=instruction,
                         output=out_path,
-                        engine=engine,
+                        engine=coder,
                         context=content if not is_xml else "",
                     )
                 size = result.stat().st_size
