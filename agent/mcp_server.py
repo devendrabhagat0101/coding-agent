@@ -48,22 +48,45 @@ import os
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+    _MCP_AVAILABLE = True
+except ImportError:
+    _MCP_AVAILABLE = False
+    FastMCP = None  # type: ignore[assignment,misc]
 
 from .config import CODER_MODEL, DEFAULT_MODEL
 from .context import build_file_tree, read_project_files
 from . import git_ops
 from . import fixer as _fixer
 
-mcp = FastMCP(
-    "coding-agent",
-    instructions=(
-        "coding-agent gives you full read/write access to a local project directory "
-        "plus git operations (branch, commit, push) and optional Ollama-powered "
-        "code review and refactoring. "
-        "All path arguments are relative to the project root unless absolute."
-    ),
-)
+if _MCP_AVAILABLE:
+    mcp = FastMCP(
+        "coding-agent",
+        instructions=(
+            "coding-agent gives you full read/write access to a local project directory "
+            "plus git operations (branch, commit, push) and optional Ollama-powered "
+            "code review and refactoring. "
+            "All path arguments are relative to the project root unless absolute."
+        ),
+    )
+else:
+    mcp = None  # type: ignore[assignment]
+
+# Dummy decorator used when mcp is not installed — makes all @mcp.tool() etc.
+# no-ops so the module imports cleanly on Python 3.9 without mcp installed.
+def _noop_decorator(*args, **kwargs):
+    def wrapper(fn):
+        return fn
+    return wrapper if args and callable(args[0]) else (lambda fn: fn)
+
+if not _MCP_AVAILABLE:
+    class _NoopmMcp:
+        def tool(self, *a, **kw):    return _noop_decorator
+        def resource(self, *a, **kw): return _noop_decorator
+        def prompt(self, *a, **kw):  return _noop_decorator
+        def run(self): pass
+    mcp = _NoopmMcp()  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -704,6 +727,13 @@ def prompt_fix_issue(file_path: str, issue_description: str) -> str:
 
 def serve(project_root: str | None = None) -> None:
     """Start the MCP server. Called by `coding-agent mcp-serve`."""
+    if not _MCP_AVAILABLE:
+        raise RuntimeError(
+            "The 'mcp' package is not installed.\n"
+            "Install it with:  pip install 'coding-agent[mcp]'\n"
+            "Note: mcp requires Python 3.10+. "
+            "If you are on Python 3.9 use python3.11 -m pip install 'coding-agent[mcp]'"
+        )
     if project_root:
         os.chdir(project_root)
     mcp.run()
