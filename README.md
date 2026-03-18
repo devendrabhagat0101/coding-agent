@@ -1,4 +1,4 @@
-# coding-agent v2.0.2
+# coding-agent v2.0.7
 
 A local AI-powered coding assistant CLI built on [Ollama](https://ollama.ai). Runs entirely on your machine — no cloud APIs, no data leaving your system.
 
@@ -82,11 +82,11 @@ git --version           # git version x.x.x
 
 ```bash
 # 1. Install coding-agent
-pip3.11 install git+https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git#subdirectory=coding-agent
+pip3.11 install git+https://github.com/devendrabhagat0101/coding-agent.git
 
 # — or clone and install locally —
-git clone https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git
-cd Dev-2.0-AI-Assistant/coding-agent
+git clone https://github.com/devendrabhagat0101/coding-agent.git
+cd coding-agent
 pip3.11 install -e .
 
 # 2. Start Ollama (keep this terminal open)
@@ -97,7 +97,7 @@ ollama pull llama3:8b           # general chat + project planning
 ollama pull qwen2.5-coder:7b    # code generation, review, refactor
 
 # 4. Run
-coding-agent --version          # coding-agent v2.0.2
+coding-agent --version          # coding-agent v2.0.7
 coding-agent                    # start interactive chat
 ```
 
@@ -107,11 +107,11 @@ coding-agent                    # start interactive chat
 
 ```powershell
 # 1. Install coding-agent (PowerShell)
-pip install git+https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git#subdirectory=coding-agent
+pip install git+https://github.com/devendrabhagat0101/coding-agent.git
 
 # — or clone and install locally —
-git clone https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git
-cd Dev-2.0-AI-Assistant\coding-agent
+git clone https://github.com/devendrabhagat0101/coding-agent.git
+cd coding-agent
 pip install -e .
 
 # 2. Start Ollama
@@ -124,7 +124,7 @@ ollama pull llama3:8b
 ollama pull qwen2.5-coder:7b
 
 # 4. Run
-coding-agent --version          # coding-agent v2.0.2
+coding-agent --version          # coding-agent v2.0.7
 coding-agent                    # start interactive chat
 ```
 
@@ -393,14 +393,14 @@ coding-agent/
 
 ```bash
 # Install from GitHub (macOS / Linux)
-pip install git+https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git#subdirectory=coding-agent
+pip install git+https://github.com/devendrabhagat0101/coding-agent.git
 
 # Install from GitHub (Windows PowerShell)
-pip install git+https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git#subdirectory=coding-agent
+pip install git+https://github.com/devendrabhagat0101/coding-agent.git
 
 # Clone and install locally
-git clone https://github.com/devendrabhagat0101/Dev-2.0-AI-Assistant.git
-cd Dev-2.0-AI-Assistant/coding-agent
+git clone https://github.com/devendrabhagat0101/coding-agent.git
+cd coding-agent
 pip install -e .
 ```
 
@@ -663,7 +663,7 @@ Run this checklist before using coding-agent:
 python3 --version              # must be 3.10+
 
 # 2. coding-agent installed
-coding-agent --version         # coding-agent v2.0.2
+coding-agent --version         # coding-agent v2.0.7
 
 # 3. Ollama running
 curl http://localhost:11434    # {"status":"Ollama is running"}
