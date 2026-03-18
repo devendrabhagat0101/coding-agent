@@ -23,10 +23,11 @@ Register with Claude Code (~/.claude/mcp.json)
 MCP primitives implemented
 --------------------------
   Tools     (AI takes action):
-    File : read_file, write_file, list_files, get_diff
-    Git  : git_status, create_branch, commit_changes,
-           push_branch, add_remote, list_remotes
-    AI   : review_file, refactor_file, apply_edit   (require Ollama)
+    File    : read_file, write_file, list_files, get_diff
+    Git     : git_status, create_branch, commit_changes,
+              push_branch, add_remote, list_remotes
+    AI      : review_file, refactor_file, apply_edit, write_document  (require Ollama)
+    History : session_history, search_sessions, get_session
 
   Resources (AI browses passively — no side effects):
     project://tree              full file tree
@@ -522,6 +523,75 @@ def write_document(
             "model":  model,
         })
 
+    except Exception as exc:  # noqa: BLE001
+        return _err(str(exc))
+
+
+@mcp.tool()
+def session_history(n: int = 10) -> dict:
+    """
+    List the most recent coding-agent chat sessions stored in the local history.
+
+    Sessions are saved automatically when the user exits the chat.
+    Each entry includes: id, started_at, directory, message_count, summary.
+
+    Args:
+        n:  Maximum number of sessions to return (default: 10).
+    """
+    try:
+        from .session_store import get_store
+        store    = get_store()
+        sessions = store.list_sessions(n=n)
+        stats    = store.stats()
+        return _ok({
+            "sessions":       sessions,
+            "total_on_disk":  stats["total_sessions"],
+            "sessions_dir":   stats["sessions_dir"],
+        })
+    except Exception as exc:  # noqa: BLE001
+        return _err(str(exc))
+
+
+@mcp.tool()
+def search_sessions(query: str, top_k: int = 5) -> dict:
+    """
+    Semantic search over past coding-agent chat sessions using Ollama embeddings.
+
+    Uses cosine similarity on Ollama-generated embeddings of session summaries.
+    Falls back to keyword matching if embeddings are unavailable.
+
+    Args:
+        query:  Natural language query, e.g. "fixed auth bug" or "built weather agent".
+        top_k:  Number of top results to return (default: 5).
+    """
+    try:
+        from .session_store import get_store
+        store   = get_store()
+        results = store.search_sessions(query, top_k=top_k)
+        return _ok({
+            "query":   query,
+            "results": results,
+            "count":   len(results),
+        })
+    except Exception as exc:  # noqa: BLE001
+        return _err(str(exc))
+
+
+@mcp.tool()
+def get_session(session_id: str) -> dict:
+    """
+    Load the full message log for a specific past session.
+
+    Args:
+        session_id:  8-char hex session ID from session_history or search_sessions.
+    """
+    try:
+        from .session_store import get_store
+        store   = get_store()
+        session = store.get_session(session_id)
+        if session is None:
+            return _err(f"Session not found: {session_id}")
+        return _ok(session)
     except Exception as exc:  # noqa: BLE001
         return _err(str(exc))
 

@@ -292,6 +292,26 @@ def _write_detected_files(
             console.print(f"[green]✓[/] Written [cyan]{out_path}[/]  ({size:,} bytes)")
 
 
+# ── Session persistence ───────────────────────────────────────────────────────
+
+def _save_session_on_exit(engine, root: Path) -> None:
+    """Save the current chat session to the local session store."""
+    try:
+        # Only save sessions with actual user messages (skip system prompt)
+        msgs = [m for m in engine._history if m.get("role") in ("user", "assistant")]
+        if len(msgs) < 2:
+            return  # nothing meaningful to save
+        from .session_store import get_store
+        store      = get_store()
+        session_id = store.save_session(msgs, directory=str(root), engine=engine)
+        console.print(
+            f"[dim]Session saved [cyan]{session_id}[/] "
+            f"({len(msgs)} messages) — use [green]/history[/] to browse.[/]"
+        )
+    except Exception:  # noqa: BLE001
+        pass  # never crash on save failure
+
+
 # ── Auth / permission flow ─────────────────────────────────────────────────────
 
 def _first_time_setup() -> str:
@@ -456,6 +476,7 @@ CHAT_HELP = textwrap.dedent("""\
       [green]/remote add NAME URL[/]            add a git remote (e.g. origin on GitHub)
       [green]/remote list[/]                    list configured remotes
       [green]/status[/]                         show git status
+      [green]/history [QUERY|ID][/]             browse / search past sessions (vector search)
       [green]/quit[/]  or Ctrl-D                exit
 """)
 
@@ -496,6 +517,8 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
             arg   = parts[1].strip() if len(parts) > 1 else ""
 
             if cmd in ("/quit", "/exit", "/q"):
+                # ── Auto-save session before exiting ──────────────────────────
+                _save_session_on_exit(engine, root)
                 console.print("[dim]Bye.[/]")
                 break
             elif cmd == "/help":
@@ -539,6 +562,73 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
                     console.print(
                         f"[dim]branch:[/] [cyan]{branch}[/]  [dim]status:[/] {status}"
                     )
+
+            elif cmd == "/history":
+                from .session_store import get_store
+                store = get_store()
+                if not arg:
+                    # List recent sessions
+                    sessions = store.list_sessions(n=10)
+                    if not sessions:
+                        console.print("[dim]No sessions saved yet. Sessions are saved when you /quit.[/]")
+                    else:
+                        rows = "\n".join(
+                            f"  [cyan]{s['id']}[/]  "
+                            f"[dim]{s['started_at'][:16]}[/]  "
+                            f"[dim]({s['message_count']} msgs)[/]  "
+                            f"{s.get('summary', '')[:70]}"
+                            for s in sessions
+                        )
+                        console.print(
+                            Panel(rows, title="[bold]Recent sessions[/]", border_style="cyan", expand=False)
+                        )
+                        console.print(
+                            "[dim]Use [green]/history QUERY[/] to search, "
+                            "[green]/history ID[/] to load a session.[/]"
+                        )
+                elif len(arg) == 8 and all(c in "0123456789abcdef" for c in arg):
+                    # Load session by ID
+                    session = store.get_session(arg)
+                    if session is None:
+                        console.print(f"[red]✗ Session not found:[/] {arg}")
+                    else:
+                        console.print(
+                            Panel(
+                                f"[bold]Session:[/] [cyan]{session['id']}[/]\n"
+                                f"[bold]Date   :[/] {session['started_at'][:16]}\n"
+                                f"[bold]Dir    :[/] {session.get('directory', '')}\n"
+                                f"[bold]Summary:[/] {session.get('summary', '')}\n"
+                                f"[bold]Messages:[/] {session['message_count']}",
+                                title="[bold]Session history[/]",
+                                border_style="cyan",
+                                expand=False,
+                            )
+                        )
+                        if Confirm.ask("Load this session into current context?", default=False):
+                            for msg in session["messages"]:
+                                if msg.get("role") in ("user", "assistant"):
+                                    engine._history.append(msg)
+                            console.print(f"[green]✓[/] Loaded {session['message_count']} messages into context.")
+                else:
+                    # Semantic search
+                    results = store.search_sessions(arg, top_k=5)
+                    if not results:
+                        console.print("[dim]No matching sessions found.[/]")
+                    else:
+                        rows = "\n".join(
+                            f"  [cyan]{s['id']}[/]  "
+                            f"[dim]{s['started_at'][:16]}[/]  "
+                            f"{s.get('summary', '')[:70]}"
+                            for s in results
+                        )
+                        console.print(
+                            Panel(
+                                rows,
+                                title=f"[bold]Sessions matching «{arg}»[/]",
+                                border_style="cyan",
+                                expand=False,
+                            )
+                        )
 
             elif cmd == "/read":
                 if not arg:
