@@ -244,20 +244,21 @@ def _default(
 
 CHAT_HELP = textwrap.dedent("""\
     [bold cyan]Chat commands[/]
-      [green]/help[/]                      show this message
-      [green]/clear[/]                     clear conversation history
-      [green]/tree[/]                      print the project file tree
-      [green]/model MODEL[/]               switch model mid-session
-      [green]/read FILE[/]                 read a file and inject its content into the chat
-      [green]/review FILE[/]               AI code review — numbered corrections list
-      [green]/edit FILE INSTRUCTION[/]     apply a targeted change to a file
-      [green]/branch NAME[/]               create & checkout a new git branch
-      [green]/commit "MSG"[/]              commit all current changes
-      [green]/push [BRANCH][/]             push current (or named) branch to origin
-      [green]/remote add NAME URL[/]       add a git remote (e.g. origin on GitHub)
-      [green]/remote list[/]               list configured remotes
-      [green]/status[/]                    show git status
-      [green]/quit[/]  or Ctrl-D           exit
+      [green]/help[/]                           show this message
+      [green]/clear[/]                          clear conversation history
+      [green]/tree[/]                           print the project file tree
+      [green]/model MODEL[/]                    switch model mid-session
+      [green]/read FILE[/]                      read a file (.docx supported) and inject into chat
+      [green]/review FILE[/]                    AI code review — numbered corrections list
+      [green]/edit FILE INSTRUCTION[/]          apply a targeted change to a file
+      [green]/convert FILE OUTPUT.ext[/]        convert any file to docx/pptx/xlsx/pdf/md/txt/csv
+      [green]/branch NAME[/]                    create & checkout a new git branch
+      [green]/commit "MSG"[/]                   commit all current changes
+      [green]/push [BRANCH][/]                  push current (or named) branch to origin
+      [green]/remote add NAME URL[/]            add a git remote (e.g. origin on GitHub)
+      [green]/remote list[/]                    list configured remotes
+      [green]/status[/]                         show git status
+      [green]/quit[/]  or Ctrl-D                exit
 """)
 
 
@@ -349,12 +350,14 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
                     if not target.exists():
                         console.print(f"[red]✗ File not found:[/] {target}")
                     else:
-                        content  = target.read_text(encoding="utf-8", errors="replace")
+                        from .context import _read_file
+                        content  = _read_file(target)   # handles .docx, .txt, and all text files
                         lang     = target.suffix.lstrip(".") or "text"
                         rel      = target.relative_to(root) if target.is_relative_to(root) else target
                         console.print(
                             Panel(
-                                Syntax(content, lang, theme="monokai", line_numbers=True),
+                                Syntax(content, lang if lang != "docx" else "text",
+                                       theme="monokai", line_numbers=True),
                                 title=f"[bold cyan]{rel}[/]",
                                 border_style="cyan",
                                 expand=False,
@@ -363,11 +366,83 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
                         # Inject into conversation so the model can answer questions
                         inject = (
                             f"I've just read `{rel}`. Here's its content:\n\n"
-                            f"```{lang}\n{content}\n```\n\n"
+                            f"```\n{content}\n```\n\n"
                             "Please keep this file in mind for my next questions."
                         )
                         reply = _stream_to_console(engine, inject)
-                        _ = reply  # response shown by _stream_to_console
+                        _ = reply
+
+            elif cmd == "/convert":
+                # /convert SOURCE OUTPUT.ext
+                # e.g.  /convert report.docx slides.pptx
+                #        /convert notes.txt  summary.pdf
+                conv_parts = arg.split(maxsplit=1)
+                if len(conv_parts) < 2:
+                    console.print(
+                        "[yellow]Usage: /convert <source_file> <output_file.ext>[/]\n"
+                        "[dim]Supported output formats: .docx .pptx .xlsx .pdf .md .txt .csv[/]"
+                    )
+                else:
+                    src_arg, out_arg = conv_parts[0], conv_parts[1]
+                    src    = Path(src_arg) if Path(src_arg).is_absolute() else root / src_arg
+                    out    = Path(out_arg) if Path(out_arg).is_absolute() else root / out_arg
+
+                    if not src.exists():
+                        console.print(f"[red]✗ Source file not found:[/] {src}")
+                    else:
+                        from .context import _read_file
+                        from .file_writer import write_document, SUPPORTED_FORMATS
+
+                        out_fmt = out.suffix.lower()
+                        if out_fmt not in SUPPORTED_FORMATS:
+                            console.print(
+                                f"[red]✗ Unsupported output format:[/] {out_fmt}\n"
+                                f"[dim]Supported: {', '.join(sorted(SUPPORTED_FORMATS))}[/]"
+                            )
+                        else:
+                            # Read source content
+                            src_content = _read_file(src)
+                            src_rel     = src.relative_to(root) if src.is_relative_to(root) else src
+
+                            console.print(
+                                f"[dim]Converting[/] [cyan]{src_rel}[/] "
+                                f"[dim]→[/] [cyan]{out.name}[/] …"
+                            )
+
+                            instruction = (
+                                f"Convert the following document content into a well-structured "
+                                f"{out_fmt.lstrip('.')} file. Preserve all sections, tables, "
+                                f"bullet points, and key information from the source.\n\n"
+                                f"Source file: {src.name}\n\n"
+                                f"{src_content}"
+                            )
+
+                            from rich.progress import Progress, SpinnerColumn, TextColumn
+                            try:
+                                with Progress(
+                                    SpinnerColumn(),
+                                    TextColumn(f"[cyan]Generating {out_fmt} …"),
+                                    transient=True,
+                                ) as prog:
+                                    prog.add_task("")
+                                    result = write_document(
+                                        instruction=instruction,
+                                        output=out.resolve(),
+                                        engine=engine,
+                                        context=src_content,
+                                    )
+                                size = result.stat().st_size
+                                console.print(
+                                    Panel(
+                                        f"[bold green]✓ Converted![/]\n\n"
+                                        f"  [dim]Source :[/] [cyan]{src_rel}[/]\n"
+                                        f"  [dim]Output :[/] [cyan]{result}[/]\n"
+                                        f"  [dim]Size   :[/] {size:,} bytes",
+                                        expand=False,
+                                    )
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                console.print(f"[red]✗ Conversion failed:[/] {exc}")
 
             elif cmd == "/review":
                 if not arg:
