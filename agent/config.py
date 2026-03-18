@@ -1,5 +1,5 @@
 # ── Version ───────────────────────────────────────────────────────────────────
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 # ── Model identifiers ─────────────────────────────────────────────────────────
 DEFAULT_MODEL = "llama3:8b"          # general chat + planning

@@ -401,7 +401,13 @@ def _coder_engine():
     from .engine import CodingEngine
     try:
         import ollama as _ol
-        available = {m["name"].split(":")[0] for m in _ol.list().get("models", [])}
+        resp = _ol.list()
+        # Support both old dict API and new pydantic ListResponse object
+        raw_models = resp.models if hasattr(resp, "models") else resp.get("models", [])
+        available = set()
+        for m in raw_models:
+            name = m.model if hasattr(m, "model") else m.get("name", "")
+            available.add(name.split(":")[0])
         coder_base = CODER_MODEL.split(":")[0]
         model = CODER_MODEL if coder_base in available else DEFAULT_MODEL
         if model != CODER_MODEL:
