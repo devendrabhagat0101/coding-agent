@@ -491,7 +491,7 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
 
     console.print(
         Panel(
-            f"[bold green]coding-agent[/]  •  [dim]user:[/] [cyan]{username}[/]  "
+            f"[bold green]coding-agent[/]  [dim]v{VERSION}[/]  •  [dim]user:[/] [cyan]{username}[/]  "
             f"•  [dim]model:[/] [cyan]{model}[/]\n"
             f"[dim]dir:[/] [cyan]{root}[/]\n"
             "[dim]Type [green]/help[/] for commands, Ctrl-D or /quit to exit.[/]",
