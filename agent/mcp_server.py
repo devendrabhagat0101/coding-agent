@@ -444,6 +444,66 @@ def apply_edit(path: str, instruction: str, model: str = CODER_MODEL, root: str 
 
 
 # ---------------------------------------------------------------------------
+# Document writer tool  (v2.0.2)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def write_document(
+    instruction: str,
+    output_path: str,
+    model: str = CODER_MODEL,
+    root: str = "",
+) -> dict:
+    """
+    Generate and write a rich document from a natural language instruction.
+
+    Supports: .docx (Word), .pptx (PowerPoint), .xlsx (Excel),
+              .pdf, .md (Markdown), .txt, .csv
+
+    Args:
+        instruction:  What to write, e.g. "Project summary with architecture section".
+        output_path:  Destination file path. Extension determines the format.
+        model:        Ollama model to use (default: qwen2.5-coder:7b).
+        root:         Project root for context (default: cwd).
+    """
+    try:
+        from .file_writer import write_document as _write_doc, SUPPORTED_FORMATS
+        r   = _root(root)
+        out = _resolve(r, output_path)
+
+        fmt = out.suffix.lower()
+        if fmt not in SUPPORTED_FORMATS:
+            return _err(
+                f"Unsupported format: {fmt}. "
+                f"Supported: {', '.join(sorted(SUPPORTED_FORMATS))}"
+            )
+
+        engine = _get_engine(model)
+
+        # Load project context
+        from .context import read_project_files
+        context = read_project_files(r)
+
+        result = _write_doc(
+            instruction=instruction,
+            output=out,
+            engine=engine,
+            context=context,
+        )
+
+        rel = str(result.relative_to(r)) if result.is_relative_to(r) else str(result)
+        return _ok({
+            "path":   rel,
+            "format": fmt,
+            "bytes":  result.stat().st_size,
+            "model":  model,
+        })
+
+    except Exception as exc:  # noqa: BLE001
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Resources  (read-only browsable data — no side effects)
 # ---------------------------------------------------------------------------
 

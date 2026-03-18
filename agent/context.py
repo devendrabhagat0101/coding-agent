@@ -27,8 +27,32 @@ def _is_ignored_dir(name: str) -> bool:
 def _is_text_file(path: Path) -> bool:
     if path.name in IGNORED_FILENAMES:
         return False
+    # .docx handled separately via _read_file
+    if path.suffix.lower() == ".docx":
+        return True
     # Extension match (handles extensionless names like Dockerfile too)
     return path.suffix in TEXT_EXTENSIONS or path.name in TEXT_EXTENSIONS
+
+
+def _read_file(path: Path) -> str:
+    """Read a file as text. Handles .docx by extracting paragraphs."""
+    if path.suffix.lower() == ".docx":
+        try:
+            from docx import Document  # python-docx
+            doc = Document(str(path))
+            lines: list[str] = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    lines.append(para.text)
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                    if cells:
+                        lines.append(" | ".join(cells))
+            return "\n".join(lines)
+        except Exception:  # noqa: BLE001
+            return f"[could not parse {path.name}]"
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +108,7 @@ def read_project_files(root: Path, max_chars: int = CONTEXT_MAX_CHARS) -> str:
             continue
 
         try:
-            content = path.read_text(encoding="utf-8", errors="replace")
+            content = _read_file(path)
         except OSError:
             continue
 

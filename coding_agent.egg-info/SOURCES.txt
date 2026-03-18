@@ -1,11 +1,16 @@
+README.md
 pyproject.toml
 agent/__init__.py
 agent/auth.py
+agent/builder.py
 agent/cli.py
 agent/config.py
 agent/context.py
 agent/engine.py
+agent/file_writer.py
+agent/fixer.py
 agent/git_ops.py
+agent/mcp_server.py
 coding_agent.egg-info/PKG-INFO
 coding_agent.egg-info/SOURCES.txt
 coding_agent.egg-info/dependency_links.txt

@@ -1,12 +1,16 @@
-# Model identifiers
-DEFAULT_MODEL = "llama3:8b"
-CODER_MODEL = "qwen2.5-coder:7b"
+# ── Version ───────────────────────────────────────────────────────────────────
+VERSION = "2.0.2"
 
-# How much file content to include in the system prompt before truncating.
-# ~32 K chars keeps most models inside their context window comfortably.
-CONTEXT_MAX_CHARS = 32_000
+# ── Model identifiers ─────────────────────────────────────────────────────────
+DEFAULT_MODEL = "llama3:8b"          # general chat + planning
+CODER_MODEL   = "qwen2.5-coder:7b"  # code generation, review, refactor
+BUILD_MODEL   = "qwen2.5-coder:7b"  # autonomous builder (code-focused)
 
-# Directories never included in the project context snapshot
+# ── Context window ────────────────────────────────────────────────────────────
+# Increased from 32 K → 64 K to handle larger multi-file projects
+CONTEXT_MAX_CHARS = 64_000
+
+# ── Directories never included in the project context snapshot ────────────────
 IGNORED_DIRS: set[str] = {
     ".git",
     "__pycache__",
@@ -25,27 +29,44 @@ IGNORED_DIRS: set[str] = {
     "*.egg-info",
     ".idea",
     ".vscode",
+    ".dart_tool",
+    ".gradle",
+    ".flutter-plugins",
+    ".flutter-plugins-dependencies",
 }
 
-# File extensions treated as plain text (everything else is skipped)
+# ── File extensions treated as plain text ─────────────────────────────────────
 TEXT_EXTENSIONS: set[str] = {
+    # Python
     ".py", ".pyi",
-    ".js", ".mjs", ".cjs",
-    ".ts", ".tsx", ".jsx",
-    ".go", ".rs", ".java",
+    # JavaScript / TypeScript
+    ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
+    # Systems / Backend
+    ".go", ".rs", ".java", ".kt", ".swift",
     ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp",
-    ".cs", ".rb", ".php", ".swift", ".kt",
-    ".dart", ".ex", ".exs",
+    ".cs", ".rb", ".php",
+    # Mobile / Frontend
+    ".dart",
+    # Functional
+    ".ex", ".exs",
+    # Shell
     ".sh", ".bash", ".zsh", ".fish",
+    # Web
     ".html", ".css", ".scss", ".sass",
+    # Data / Config
     ".sql", ".graphql",
-    ".md", ".txt", ".rst",
     ".toml", ".yaml", ".yml", ".json", ".ini", ".cfg", ".conf",
     ".env.example", ".gitignore", ".dockerignore",
-    "Dockerfile", "Makefile",
+    # Docs / Requirements  ← NEW: agent can now read requirements files
+    ".md", ".txt", ".rst",
+    # Build files
+    "Dockerfile", "Makefile", "Gradlefile",
+    ".gradle",          # Gradle build scripts
+    ".properties",      # Spring Boot application.properties
+    "pubspec.yaml",     # Flutter dependency file (also matched by .yaml)
 }
 
-# Hard-skip these filenames regardless of extension (may contain secrets)
+# ── Hard-skip filenames regardless of extension ───────────────────────────────
 IGNORED_FILENAMES: set[str] = {
     ".env",
     ".env.local",

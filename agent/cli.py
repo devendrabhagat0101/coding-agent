@@ -28,7 +28,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 import textwrap
 
-from .config import CODER_MODEL, DEFAULT_MODEL
+from .config import CODER_MODEL, DEFAULT_MODEL, BUILD_MODEL, VERSION
 from .context import build_file_tree, build_system_prompt
 from .engine import CodingEngine, OllamaUnavailableError
 from . import git_ops
@@ -197,6 +197,12 @@ def _request_directory_permission(directory: Path) -> None:
 
 # ── Default callback (runs when no subcommand is given) ───────────────────────
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"coding-agent [bold cyan]v{VERSION}[/]")
+        raise typer.Exit()
+
+
 @app.callback()
 def _default(
     ctx: typer.Context,
@@ -210,6 +216,13 @@ def _default(
         DEFAULT_MODEL,
         "--model", "-m",
         help=f"Ollama model (default: {DEFAULT_MODEL}).",
+    ),
+    version: bool = typer.Option(
+        False,
+        "--version", "-v",
+        help="Show version and exit.",
+        callback=_version_callback,
+        is_eager=True,
     ),
 ) -> None:
     """
@@ -1067,3 +1080,170 @@ def fix_from_chat(
         console.print(f"[dim]Fix {fix_id} marked as APPLIED in chatbot.[/]\n")
 
     console.print("[bold green]Done.[/] All pending fixes processed.")
+
+
+# ── Subcommand: write-doc  (v2.0.2 — Rich File Writer) ───────────────────────
+
+@app.command(name="write-doc")
+def write_doc(
+    instruction: str = typer.Argument(
+        ...,
+        help='What to write. e.g. "Project summary for WeatherAgent with architecture section"',
+    ),
+    output: Path = typer.Option(
+        ..., "--output", "-o",
+        help="Output file path. Extension sets the format: .docx .pptx .xlsx .pdf .md .txt .csv",
+    ),
+    model: str = typer.Option(
+        CODER_MODEL, "--model", "-m",
+        help=f"Ollama model (default: {CODER_MODEL}).",
+    ),
+    context_dir: Path = typer.Option(
+        None, "--context-dir", "-c",
+        help="Optional project directory to include as context.",
+        show_default=False,
+    ),
+) -> None:
+    """
+    Generate and write a document from a natural language instruction.
+
+    Supported output formats:
+      .docx  Word document
+      .pptx  PowerPoint presentation
+      .xlsx  Excel workbook
+      .pdf   PDF document
+      .md    Markdown
+      .txt   Plain text
+      .csv   CSV table
+
+    Examples:
+      coding-agent write-doc "Project summary for WeatherAgent" --output summary.docx
+      coding-agent write-doc "Architecture slides for WeatherAgent" --output slides.pptx
+      coding-agent write-doc "API endpoint comparison table" --output api_table.xlsx
+      coding-agent write-doc "Weekly status report" --output report.pdf
+    """
+    from .file_writer import write_document, SUPPORTED_FORMATS
+
+    fmt = output.suffix.lower()
+    if fmt not in SUPPORTED_FORMATS:
+        err_console.print(
+            f"✗ Unsupported format: [bold]{fmt}[/]\n"
+            f"  Supported: {', '.join(sorted(SUPPORTED_FORMATS))}"
+        )
+        raise typer.Exit(code=1)
+
+    _ensure_logged_in()
+
+    engine = _engine_or_exit(model)
+
+    # Optionally load project context
+    context = ""
+    if context_dir and context_dir.exists():
+        from .context import read_project_files
+        _request_directory_permission(context_dir.resolve())
+        context = read_project_files(context_dir.resolve())
+
+    console.print(
+        Panel(
+            f"[bold green]write-doc[/]  [dim]v{VERSION}[/]\n\n"
+            f"  [dim]Instruction:[/] {instruction}\n"
+            f"  [dim]Output     :[/] [cyan]{output}[/]\n"
+            f"  [dim]Format     :[/] [cyan]{fmt}[/]\n"
+            f"  [dim]Model      :[/] [cyan]{model}[/]",
+            title="[bold cyan]coding-agent write-doc[/]",
+            expand=False,
+        )
+    )
+
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    with Progress(SpinnerColumn(), TextColumn("[cyan]{task.description}"), transient=True) as prog:
+        prog.add_task(f"Generating {fmt} document …")
+        try:
+            result = write_document(
+                instruction=instruction,
+                output=output.resolve(),
+                engine=engine,
+                context=context,
+            )
+        except Exception as exc:  # noqa: BLE001
+            err_console.print(f"\n✗ Failed to write document: {exc}")
+            raise typer.Exit(code=1) from exc
+
+    console.print(
+        Panel(
+            f"[bold green]Done![/]\n\n"
+            f"  [dim]File:[/] [cyan]{result}[/]\n"
+            f"  [dim]Size:[/] {result.stat().st_size:,} bytes",
+            expand=False,
+        )
+    )
+
+
+# ── Subcommand: build  (v2.0.1 — Autonomous Project Builder) ──────────────────
+
+@app.command()
+def build(
+    requirements: Path = typer.Argument(
+        ...,
+        help="Requirements file (.md / .txt / .docx).",
+    ),
+    directory: Path = typer.Option(
+        Path.cwd(), "--dir", "-d", show_default=False,
+        help="Output directory where the project will be created.",
+    ),
+    model: str = typer.Option(
+        BUILD_MODEL, "--model", "-m",
+        help=f"Ollama model for code generation (default: {BUILD_MODEL}).",
+    ),
+    review: bool = typer.Option(
+        True, "--review/--no-review",
+        help="Auto-review and fix each generated file (default: on).",
+    ),
+    git_commit: bool = typer.Option(
+        True, "--git/--no-git",
+        help="Git init and commit all generated files (default: on).",
+    ),
+) -> None:
+    """
+    Autonomous project builder — reads a requirements file and generates
+    a complete multi-service project (Flutter UI + Java Spring Boot + Python)
+    using only local Ollama models. No paid APIs required.
+
+    Example:
+        coding-agent build WeatherAgent_Requirements.md --dir ./weather-project
+        coding-agent build requirements.docx --dir ./my-app --no-review
+    """
+    if not requirements.exists():
+        err_console.print(f"✗ Requirements file not found: {requirements}")
+        raise typer.Exit(code=1)
+
+    _ensure_logged_in()
+    _request_directory_permission(directory.resolve())
+
+    from .builder import build as _build, OllamaUnavailableError as _OllamaErr
+    from .engine import OllamaUnavailableError
+
+    console.print(
+        Panel(
+            f"[bold green]Autonomous Project Builder[/]  [dim]v{VERSION}[/]\n\n"
+            f"  [dim]Requirements:[/] [cyan]{requirements}[/]\n"
+            f"  [dim]Output dir  :[/] [cyan]{directory.resolve()}[/]\n"
+            f"  [dim]Model       :[/] [cyan]{model}[/]\n"
+            f"  [dim]Auto-review :[/] {'[green]on[/]' if review else '[dim]off[/]'}\n"
+            f"  [dim]Git commit  :[/] {'[green]on[/]' if git_commit else '[dim]off[/]'}",
+            title="[bold cyan]coding-agent build[/]",
+            expand=False,
+        )
+    )
+
+    try:
+        _build(
+            req_file=requirements.resolve(),
+            output_dir=directory.resolve(),
+            model=model,
+            do_review=review,
+            do_git=git_commit,
+        )
+    except (OllamaUnavailableError, RuntimeError) as exc:
+        err_console.print(f"\n✗ Build failed: {exc}")
+        raise typer.Exit(code=1) from exc
