@@ -94,6 +94,118 @@ def _extract_code_blocks(text: str) -> list[tuple[str, str]]:
     return [(m.group(1) or "text", m.group(2)) for m in pattern.finditer(text)]
 
 
+def _extract_file_blocks(text: str) -> list[tuple[str, str]]:
+    """
+    Scan an LLM reply for filename + content pairs.
+    Returns list of (filename, content) — content is the raw text to write.
+
+    Detects three patterns (in priority order):
+      1. <!-- FILE: name.ext --> immediately before a code block  (preferred)
+      2. **Creating `name.ext`** / **name.ext:** before a code block
+      3. cat > name.ext  inside a bash code block
+    """
+    results: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    # ── Pattern 1: <!-- FILE: filename --> ────────────────────────────────────
+    p1 = re.compile(
+        r"<!--\s*FILE:\s*([\w.\-/]+\.\w+)\s*-->\s*\n```(?:\w*)\n(.*?)```",
+        re.DOTALL,
+    )
+    for m in p1.finditer(text):
+        fname, content = m.group(1).strip(), m.group(2)
+        if fname not in seen:
+            results.append((fname, content))
+            seen.add(fname)
+
+    # ── Pattern 2: **Creating `filename.ext`** or **filename.ext:** ──────────
+    p2 = re.compile(
+        r"\*\*(?:[Cc]reating\s+)?[`\"]?([\w.\-/]+\.\w+)[`\"]?(?:\s+file)?[:\s]*\*\*"
+        r"(?:.*?\n)*?```(?:\w*)\n(.*?)```",
+        re.DOTALL,
+    )
+    for m in p2.finditer(text):
+        fname, content = m.group(1).strip(), m.group(2)
+        if fname not in seen:
+            results.append((fname, content))
+            seen.add(fname)
+
+    # ── Pattern 3: cat > filename.ext  inside bash blocks ────────────────────
+    bash_re = re.compile(r"```(?:bash|sh|shell|zsh)?\n(.*?)```", re.DOTALL)
+    cat_re  = re.compile(
+        r"(?:^\$\s*)?cat\s*>\s*([\w.\-/]+\.\w+)\s*\n(.*?)(?=(?:^\$\s*exit|\Z))",
+        re.DOTALL | re.MULTILINE,
+    )
+    for bb in bash_re.finditer(text):
+        for cm in cat_re.finditer(bb.group(1)):
+            fname   = cm.group(1).strip()
+            content = re.sub(r"^\$\s*", "", cm.group(2), flags=re.MULTILINE).rstrip()
+            if fname not in seen:
+                results.append((fname, content))
+                seen.add(fname)
+
+    return results
+
+
+def _write_detected_files(
+    file_blocks: list[tuple[str, str]],
+    root: Path,
+    engine,
+) -> None:
+    """Prompt the user and write each (filename, content) pair to *root*."""
+    from .file_writer import SUPPORTED_FORMATS, write_document
+
+    TEXT_EXTS = {".md", ".txt", ".csv", ".py", ".js", ".ts", ".html", ".css",
+                 ".json", ".yaml", ".yml", ".toml", ".sh", ".bash", ".rb",
+                 ".go", ".rs", ".java", ".kt", ".swift", ".c", ".cpp", ".h",
+                 ".sql", ".graphql", ".ini", ".cfg", ".env.example", ".rst"}
+
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(f"  [cyan]{fname}[/]" for fname, _ in file_blocks),
+            title=f"[bold yellow]↓ {len(file_blocks)} file(s) detected[/]",
+            border_style="yellow",
+            expand=False,
+        )
+    )
+
+    if not Confirm.ask(f"Write to [cyan]{root}[/]?", default=True):
+        console.print("[dim]Files not written.[/]")
+        return
+
+    for fname, content in file_blocks:
+        out_path = (root / fname).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        ext = Path(fname).suffix.lower()
+
+        if ext in SUPPORTED_FORMATS and ext not in TEXT_EXTS:
+            # Binary format (pptx, xlsx, pdf, docx) — use write_document
+            console.print(f"[dim]Generating [cyan]{fname}[/] via document writer …[/]")
+            try:
+                from rich.progress import Progress, SpinnerColumn, TextColumn
+                with Progress(SpinnerColumn(), TextColumn(f"[cyan]{fname}[/]"), transient=True) as prog:
+                    prog.add_task("")
+                    result = write_document(
+                        instruction=(
+                            f"Create a {ext.lstrip('.')} file named '{fname}' "
+                            f"with the following content:\n\n{content}"
+                        ),
+                        output=out_path,
+                        engine=engine,
+                        context=content,
+                    )
+                size = result.stat().st_size
+                console.print(f"[green]✓[/] Written [cyan]{result}[/]  ({size:,} bytes)")
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[red]✗ Failed to generate {fname}:[/] {exc}")
+        else:
+            # Plain text — write directly
+            out_path.write_text(content, encoding="utf-8")
+            size = out_path.stat().st_size
+            console.print(f"[green]✓[/] Written [cyan]{out_path}[/]  ({size:,} bytes)")
+
+
 # ── Auth / permission flow ─────────────────────────────────────────────────────
 
 def _first_time_setup() -> str:
@@ -560,17 +672,23 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
         # ── Normal message ────────────────────────────────────────────────────
         console.print("\n[bold green]agent[/]", end="")
         reply  = _stream_to_console(engine, user_input)
-        blocks = _extract_code_blocks(reply)
-        if len(blocks) == 1:
-            lang, code = blocks[0]
-            console.print(
-                Panel(
-                    Syntax(code.rstrip(), lang or "text", theme="monokai", line_numbers=True),
-                    title=f"[dim]{lang}[/]",
-                    border_style="dim",
-                    expand=False,
+
+        # Auto-detect files in the reply and offer to write them to disk
+        file_blocks = _extract_file_blocks(reply)
+        if file_blocks:
+            _write_detected_files(file_blocks, root, engine)
+        else:
+            blocks = _extract_code_blocks(reply)
+            if len(blocks) == 1:
+                lang, code = blocks[0]
+                console.print(
+                    Panel(
+                        Syntax(code.rstrip(), lang or "text", theme="monokai", line_numbers=True),
+                        title=f"[dim]{lang}[/]",
+                        border_style="dim",
+                        expand=False,
+                    )
                 )
-            )
 
 
 # ── Subcommand: chat ───────────────────────────────────────────────────────────

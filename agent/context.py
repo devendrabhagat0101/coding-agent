@@ -139,6 +139,13 @@ def build_system_prompt(root: Path) -> str:
     return (
         "You are an expert coding assistant with full knowledge of the project below.\n"
         "Use this context to give precise, actionable answers.\n\n"
+        "IMPORTANT — when asked to CREATE or WRITE files, use EXACTLY this format for each file:\n"
+        "<!-- FILE: filename.ext -->\n"
+        "```lang\n"
+        "<full file content>\n"
+        "```\n"
+        "Replace 'lang' with the correct language tag (py, md, js, txt, etc.).\n"
+        "This marker lets the agent write the file to disk automatically.\n\n"
         "## Project Structure\n\n"
         "```\n"
         f"{tree}\n"
