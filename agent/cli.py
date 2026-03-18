@@ -223,8 +223,7 @@ def _generate_and_write_files(
             # Binary format — use write_document with the CODER model for
             # reliable JSON plan generation (llama3:8b often returns invalid JSON)
             from .config import CODER_MODEL
-            from .engine import CodingEngine as _CE
-            coder = _CE(model=CODER_MODEL)
+            coder = _coder_engine()
 
             # Build a clear instruction so the coder model knows what to produce
             if source_context:
@@ -237,7 +236,7 @@ def _generate_and_write_files(
                 instruction = user_input
 
             console.print(
-                f"[dim]Generating [cyan]{fname}[/] using [cyan]{CODER_MODEL}[/] …[/]"
+                f"[dim]Generating [cyan]{fname}[/] using [cyan]{coder.model}[/] …[/]"
             )
             try:
                 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -361,8 +360,7 @@ def _write_detected_files(
             # Binary format (pptx, xlsx, pdf, docx) — use write_document
             # Always use the CODER model for reliable JSON plan generation.
             from .config import CODER_MODEL
-            from .engine import CodingEngine as _CE2
-            coder = _CE2(model=CODER_MODEL)
+            coder = _coder_engine()
 
             is_xml = content.strip().startswith("<")
             instruction = (
@@ -370,7 +368,7 @@ def _write_detected_files(
                 if is_xml
                 else f"Create a {ext.lstrip('.').upper()} file named '{fname}' with this content:\n\n{content}"
             )
-            console.print(f"[dim]Generating [cyan]{fname}[/] using [cyan]{CODER_MODEL}[/] …[/]")
+            console.print(f"[dim]Generating [cyan]{fname}[/] using [cyan]{coder.model}[/] …[/]")
             try:
                 from rich.progress import Progress, SpinnerColumn, TextColumn
                 with Progress(SpinnerColumn(), TextColumn(f"[cyan]{fname}[/]"), transient=True) as prog:
@@ -390,6 +388,30 @@ def _write_detected_files(
             out_path.write_text(content, encoding="utf-8")
             size = out_path.stat().st_size
             console.print(f"[green]✓[/] Written [cyan]{out_path}[/]  ({size:,} bytes)")
+
+
+# ── Model helpers ─────────────────────────────────────────────────────────────
+
+def _coder_engine():
+    """
+    Return a CodingEngine using the coder model.
+    Falls back to DEFAULT_MODEL if CODER_MODEL isn't installed locally.
+    """
+    from .config import CODER_MODEL, DEFAULT_MODEL
+    from .engine import CodingEngine
+    try:
+        import ollama as _ol
+        available = {m["name"].split(":")[0] for m in _ol.list().get("models", [])}
+        coder_base = CODER_MODEL.split(":")[0]
+        model = CODER_MODEL if coder_base in available else DEFAULT_MODEL
+        if model != CODER_MODEL:
+            console.print(
+                f"[yellow]⚠ {CODER_MODEL} not found — using {DEFAULT_MODEL} instead.[/]\n"
+                f"[dim]  Pull it with: [cyan]ollama pull {CODER_MODEL}[/][/]"
+            )
+    except Exception:  # noqa: BLE001
+        model = DEFAULT_MODEL
+    return CodingEngine(model=model)
 
 
 # ── Session persistence ───────────────────────────────────────────────────────
