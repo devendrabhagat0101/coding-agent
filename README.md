@@ -408,6 +408,158 @@ Each developer needs their own Ollama installation and pulled models — no shar
 
 ---
 
+## First-Time Usage Walkthrough
+
+After installing, follow these steps to use coding-agent on your first project.
+
+### Step 1 — Create a project folder
+
+**macOS / Linux:**
+```bash
+mkdir my-first-project
+cd my-first-project
+```
+
+**Windows (PowerShell):**
+```powershell
+mkdir my-first-project
+cd my-first-project
+```
+
+---
+
+### Step 2 — Start coding-agent
+
+```bash
+coding-agent
+```
+
+---
+
+### Step 3 — Register (first time only)
+
+On the very first run you will see a registration prompt:
+
+```
+No account found. Let's set one up.
+Username: admin
+Password:
+Confirm password:
+✓ Account created.
+```
+
+> Type your chosen username (e.g. `admin`) and a password. This is a **local-only** account stored on your machine — it is not sent anywhere.
+
+---
+
+### Step 4 — Trust the folder
+
+After login the agent asks permission to read/write your project folder:
+
+```
+Allow coding-agent to access /path/to/my-first-project? [y/N]:
+```
+
+Type **`y`** and press Enter.
+
+> This approval is saved — you will not be asked again for this folder.
+
+---
+
+### Step 5 — You are in the chat
+
+You should now see the chat panel:
+
+```
+╭─────────────────────────────────────────────╮
+│  coding-agent  •  user: admin  •  model: llama3:8b  │
+│  dir: /path/to/my-first-project             │
+│  Type /help for commands, Ctrl-D to exit.   │
+╰─────────────────────────────────────────────╯
+
+admin>
+```
+
+---
+
+### Step 6 — Create a test file and open it
+
+Type this in the chat prompt to ask the agent to create a file:
+
+```
+admin> create a Python hello world script and save it as hello.py
+```
+
+The agent will generate and write `hello.py`. Now open it from the same chat session:
+
+```
+admin> /read hello.py
+```
+
+You will see the file contents printed in the terminal with syntax highlighting.
+
+To run it without leaving the agent:
+
+**macOS / Linux** — open a second terminal tab and run:
+```bash
+python3 hello.py
+```
+
+**Windows** — open a second PowerShell window and run:
+```powershell
+python hello.py
+```
+
+---
+
+### Step 7 — Try more commands
+
+```
+admin> /review hello.py          # AI reviews the file for issues
+admin> /edit hello.py add a name input so it greets the user by name
+admin> /branch feature/greet     # create a git branch
+admin> /commit "feat: greet user by name"
+admin> /quit                     # exit the agent
+```
+
+---
+
+### Full first-session example (macOS)
+
+```bash
+mkdir my-first-project && cd my-first-project
+coding-agent
+# > Username: admin
+# > Password: ****
+# > Allow access? y
+# (inside chat)
+# > create a Python hello world script and save it as hello.py
+# > /read hello.py
+# > /review hello.py
+# > /quit
+python3 hello.py
+# Hello, World!
+```
+
+### Full first-session example (Windows)
+
+```powershell
+mkdir my-first-project; cd my-first-project
+coding-agent
+# > Username: admin
+# > Password: ****
+# > Allow access? y
+# (inside chat)
+# > create a Python hello world script and save it as hello.py
+# > /read hello.py
+# > /review hello.py
+# > /quit
+python hello.py
+# Hello, World!
+```
+
+---
+
 ## Troubleshooting
 
 ### Ollama — Installation & Setup
