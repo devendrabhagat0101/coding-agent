@@ -121,6 +121,8 @@ def _doc_prompt(instruction: str, fmt: str, context: str = "") -> str:
 
 
 def _extract_json(text: str) -> str:
+    if not text or not isinstance(text, str):
+        return "{}"
     text = re.sub(r"```(?:json)?\s*", "", text)
     text = re.sub(r"```", "", text)
     start = text.find("{")
@@ -137,19 +139,86 @@ def _extract_json(text: str) -> str:
     return text[start:].strip()
 
 
+def _fallback_pptx_plan(instruction: str, context: str) -> dict:
+    """
+    Build a minimal valid pptx plan from the context text when the LLM
+    fails to produce valid JSON. Splits the context into sections by
+    heading lines (## / ###) and maps each to a slide.
+    """
+    lines = (context or instruction).splitlines()
+    title = "Presentation"
+    subtitle = ""
+    slides: list[dict] = []
+    current_title = ""
+    current_bullets: list[str] = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            title = line.lstrip("# ").strip()
+        elif line.startswith("## ") or line.startswith("### "):
+            if current_title:
+                slides.append({"title": current_title, "layout": "bullets",
+                                "bullets": current_bullets or [""], "notes": ""})
+            current_title = line.lstrip("# ").strip()
+            current_bullets = []
+        elif line.startswith("- ") or line.startswith("* "):
+            current_bullets.append(line.lstrip("-* ").strip())
+        elif current_title and not line.startswith("#"):
+            current_bullets.append(line)
+
+    if current_title:
+        slides.append({"title": current_title, "layout": "bullets",
+                        "bullets": current_bullets or [""], "notes": ""})
+
+    if not slides:
+        # Absolute fallback — one slide per paragraph
+        for i, chunk in enumerate(lines[:10]):
+            if chunk:
+                slides.append({"title": f"Slide {i+1}", "layout": "bullets",
+                                "bullets": [chunk], "notes": ""})
+
+    return {"title": title, "subtitle": subtitle, "slides": slides[:15]}
+
+
 def plan_document(instruction: str, fmt: str, engine: Any, context: str = "") -> dict:
-    """Ask Ollama to generate a document plan as JSON."""
-    from .engine import CodingEngine
-    prompt = _doc_prompt(instruction, fmt, context)
-    raw = engine.complete(prompt, system=_DOC_SYSTEM, temperature=0.2)
-    json_str = _extract_json(raw)
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"AI returned invalid JSON for document plan.\n"
-            f"Raw:\n{raw[:600]}\nError: {exc}"
-        ) from exc
+    """
+    Ask Ollama to generate a document plan as JSON.
+    Retries once with a simpler prompt, then falls back to a
+    structure derived directly from the source context.
+    """
+    for attempt in range(2):
+        prompt = _doc_prompt(instruction, fmt, context) if attempt == 0 else (
+            f"Return ONLY a JSON object for a {fmt.upper()} with this schema:\n"
+            + {
+                "pptx": '{"title":"…","subtitle":"…","slides":[{"title":"…","layout":"bullets","bullets":["…"],"notes":""}]}',
+                "docx": '{"title":"…","sections":[{"heading":"…","level":1,"paragraphs":["…"],"bullets":["…"]}]}',
+                "xlsx": '{"title":"…","sheets":[{"name":"Sheet1","headers":["…"],"rows":[["…"]],"summary":"…"}]}',
+                "pdf":  '{"title":"…","sections":[{"heading":"…","level":1,"paragraphs":["…"],"bullets":["…"]}]}',
+            }.get(fmt, '{"title":"…","sections":[]}')
+            + f"\n\nContent to use:\n{(context or instruction)[:2000]}"
+            + "\n\nReturn ONLY valid JSON. No explanation."
+        )
+        raw = engine.complete(prompt, system=_DOC_SYSTEM, temperature=0.1)
+        json_str = _extract_json(raw)
+        try:
+            plan = json.loads(json_str)
+            if plan:
+                return plan
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Both LLM attempts failed — build plan directly from context
+    if fmt == "pptx":
+        return _fallback_pptx_plan(instruction, context)
+    # Generic fallback for other formats
+    return {
+        "title": instruction[:60],
+        "sections": [{"heading": "Content", "level": 1,
+                      "paragraphs": [(context or instruction)[:500]], "bullets": []}],
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
