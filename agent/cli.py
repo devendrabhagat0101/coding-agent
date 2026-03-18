@@ -94,6 +94,92 @@ def _extract_code_blocks(text: str) -> list[tuple[str, str]]:
     return [(m.group(1) or "text", m.group(2)) for m in pattern.finditer(text)]
 
 
+# Known file extensions the agent can generate
+_FILE_EXTS = {
+    ".md", ".txt", ".py", ".js", ".ts", ".html", ".css", ".json",
+    ".yaml", ".yml", ".toml", ".sh", ".bash", ".rb", ".go", ".rs",
+    ".java", ".kt", ".sql", ".csv", ".rst", ".ini", ".cfg",
+    ".docx", ".pptx", ".xlsx", ".pdf",
+}
+_CREATE_WORDS = re.compile(
+    r"\b(create|write|make|generate|build|produce|prepare|draft)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_file_intent(user_input: str) -> list[str]:
+    """
+    Return filenames the user wants to create from their message.
+    Matches e.g. "create readme.md and slides.pptx" → ['readme.md', 'slides.pptx']
+    Only fires when a creation verb is also present.
+    """
+    if not _CREATE_WORDS.search(user_input):
+        return []
+    fname_re = re.compile(r"\b([\w.\-/]+\.(" + "|".join(e.lstrip(".") for e in _FILE_EXTS) + r"))\b")
+    return [m.group(1) for m in fname_re.finditer(user_input)]
+
+
+def _generate_and_write_files(
+    filenames: list[str],
+    user_input: str,
+    root: Path,
+    engine,
+) -> None:
+    """Generate content for each requested file and write to disk."""
+    from .file_writer import SUPPORTED_FORMATS, write_document
+
+    TEXT_EXTS = _FILE_EXTS - {".docx", ".pptx", ".xlsx", ".pdf"}
+
+    console.print(
+        Panel(
+            "\n".join(f"  [cyan]{f}[/]" for f in filenames),
+            title=f"[bold yellow]↓ Creating {len(filenames)} file(s)[/]",
+            border_style="yellow",
+            expand=False,
+        )
+    )
+
+    for fname in filenames:
+        ext = Path(fname).suffix.lower()
+        out_path = (root / fname).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if ext in SUPPORTED_FORMATS and ext not in TEXT_EXTS:
+            # Binary format — use write_document (it calls Ollama internally)
+            console.print(f"[dim]Generating [cyan]{fname}[/] …[/]")
+            try:
+                from rich.progress import Progress, SpinnerColumn, TextColumn
+                with Progress(SpinnerColumn(), TextColumn(f"[cyan]{fname}[/]"), transient=True) as prog:
+                    prog.add_task("")
+                    result = write_document(
+                        instruction=user_input,
+                        output=out_path,
+                        engine=engine,
+                        context="",
+                    )
+                size = result.stat().st_size
+                console.print(f"[green]✓[/] Written [cyan]{result}[/]  ({size:,} bytes)")
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[red]✗ Failed to generate {fname}:[/] {exc}")
+        else:
+            # Text file — ask LLM for the content only
+            lang = ext.lstrip(".")
+            gen_prompt = (
+                f"Generate the complete content for a file named `{fname}`.\n"
+                f"User's request: {user_input}\n\n"
+                f"Output ONLY the file content — no explanation, no markdown wrapper, "
+                f"no preamble. Just the raw file content ready to save."
+            )
+            console.print(f"[dim]Generating [cyan]{fname}[/] …[/]")
+            content = engine.complete(gen_prompt, temperature=0.2)
+            # Strip any accidental markdown fences the LLM adds
+            content = re.sub(r"^```\w*\n?", "", content.strip())
+            content = re.sub(r"\n?```$", "", content.strip())
+            out_path.write_text(content + "\n", encoding="utf-8")
+            size = out_path.stat().st_size
+            console.print(f"[green]✓[/] Written [cyan]{out_path}[/]  ({size:,} bytes)")
+
+
 def _extract_file_blocks(text: str) -> list[tuple[str, str]]:
     """
     Scan an LLM reply for filename + content pairs.
@@ -670,10 +756,18 @@ def _run_chat(root: Path, model: str, username: str, no_context: bool = False) -
             continue
 
         # ── Normal message ────────────────────────────────────────────────────
+
+        # Check if user wants to create files — handle BEFORE sending to LLM
+        # so we don't depend on the LLM knowing it can write files.
+        requested_files = _detect_file_intent(user_input)
+        if requested_files:
+            _generate_and_write_files(requested_files, user_input, root, engine)
+            continue
+
         console.print("\n[bold green]agent[/]", end="")
         reply  = _stream_to_console(engine, user_input)
 
-        # Auto-detect files in the reply and offer to write them to disk
+        # Fallback: detect files in the reply and offer to write them
         file_blocks = _extract_file_blocks(reply)
         if file_blocks:
             _write_detected_files(file_blocks, root, engine)
