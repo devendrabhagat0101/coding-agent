@@ -102,21 +102,93 @@ _FILE_EXTS = {
     ".docx", ".pptx", ".xlsx", ".pdf",
 }
 _CREATE_WORDS = re.compile(
-    r"\b(create|write|make|generate|build|produce|prepare|draft)\b",
+    r"\b(create|write|make|generate|build|produce|prepare|draft|convert)\b",
     re.IGNORECASE,
 )
+
+# Natural-language format aliases → default filename
+_FORMAT_ALIASES: dict[str, str] = {
+    "powerpoint":    "presentation.pptx",
+    "ppt":           "presentation.pptx",
+    "pptx":          "presentation.pptx",
+    "word":          "document.docx",
+    "docx":          "document.docx",
+    "excel":         "spreadsheet.xlsx",
+    "xlsx":          "spreadsheet.xlsx",
+    "spreadsheet":   "spreadsheet.xlsx",
+    "pdf":           "document.pdf",
+    "markdown":      "README.md",
+}
 
 
 def _detect_file_intent(user_input: str) -> list[str]:
     """
     Return filenames the user wants to create from their message.
-    Matches e.g. "create readme.md and slides.pptx" → ['readme.md', 'slides.pptx']
-    Only fires when a creation verb is also present.
+
+    Detects two patterns:
+      1. Explicit filename  — "create readme.md and slides.pptx"
+      2. Format-only mention — "create a powerpoint" / "format .pptx"
+    Only fires when a creation verb is present.
     """
     if not _CREATE_WORDS.search(user_input):
         return []
-    fname_re = re.compile(r"\b([\w.\-/]+\.(" + "|".join(e.lstrip(".") for e in _FILE_EXTS) + r"))\b")
-    return [m.group(1) for m in fname_re.finditer(user_input)]
+
+    results: list[str] = []
+    seen: set[str] = set()
+
+    # Output formats only — don't treat source files (.md, .txt) as output
+    _OUTPUT_EXTS = {".pptx", ".docx", ".xlsx", ".pdf", ".py", ".js", ".ts",
+                    ".html", ".css", ".json", ".yaml", ".yml", ".toml",
+                    ".sh", ".bash", ".rb", ".go", ".rs", ".java", ".kt",
+                    ".sql", ".csv", ".rst", ".ini", ".cfg"}
+
+    # Pattern 1: explicit output filename (e.g. slides.pptx, report.pdf)
+    fname_re = re.compile(
+        r"\b([\w.\-/]+\.(" + "|".join(e.lstrip(".") for e in _OUTPUT_EXTS) + r"))\b"
+    )
+    for m in fname_re.finditer(user_input):
+        fname = m.group(1)
+        if fname not in seen:
+            results.append(fname)
+            seen.add(fname)
+
+    if results:
+        return results
+
+    # Pattern 2: format-only mention ("create a PowerPoint", "format .pptx")
+    lower = user_input.lower()
+    for alias, default_fname in _FORMAT_ALIASES.items():
+        if re.search(r'\b' + alias + r'\b', lower) or f".{alias}" in lower:
+            if default_fname not in seen:
+                results.append(default_fname)
+                seen.add(default_fname)
+
+    return results
+
+
+def _find_source_file(user_input: str, root: Path) -> str:
+    """
+    If the user mentions a source file (e.g. 'for the README.md file'),
+    find it in root and return its text content. Returns "" if none found.
+    """
+    src_re = re.compile(r'\b([\w.\-/]+\.(md|txt|docx|rst|csv))\b', re.IGNORECASE)
+    for m in src_re.finditer(user_input):
+        candidate = root / m.group(1)
+        if candidate.exists():
+            try:
+                from .context import _read_file
+                return _read_file(candidate)
+            except Exception:  # noqa: BLE001
+                pass
+    # Fallback: find any .md file in the project root
+    md_files = list(root.glob("*.md"))
+    if md_files:
+        try:
+            from .context import _read_file
+            return _read_file(md_files[0])
+        except Exception:  # noqa: BLE001
+            pass
+    return ""
 
 
 def _generate_and_write_files(
@@ -129,6 +201,9 @@ def _generate_and_write_files(
     from .file_writer import SUPPORTED_FORMATS, write_document
 
     TEXT_EXTS = _FILE_EXTS - {".docx", ".pptx", ".xlsx", ".pdf"}
+
+    # Try to find a source file mentioned by the user (e.g. the .md to convert)
+    source_context = _find_source_file(user_input, root)
 
     console.print(
         Panel(
@@ -155,7 +230,7 @@ def _generate_and_write_files(
                         instruction=user_input,
                         output=out_path,
                         engine=engine,
-                        context="",
+                        context=source_context,
                     )
                 size = result.stat().st_size
                 console.print(f"[green]✓[/] Written [cyan]{result}[/]  ({size:,} bytes)")
@@ -267,19 +342,24 @@ def _write_detected_files(
 
         if ext in SUPPORTED_FORMATS and ext not in TEXT_EXTS:
             # Binary format (pptx, xlsx, pdf, docx) — use write_document
+            # Treat the detected content as context, not as instruction,
+            # so the LLM gets a clean natural-language instruction.
             console.print(f"[dim]Generating [cyan]{fname}[/] via document writer …[/]")
+            is_xml = content.strip().startswith("<")
+            instruction = (
+                f"Create a well-structured {ext.lstrip('.')} file named '{fname}'."
+                if is_xml
+                else f"Create a {ext.lstrip('.')} file named '{fname}' with this content:\n\n{content}"
+            )
             try:
                 from rich.progress import Progress, SpinnerColumn, TextColumn
                 with Progress(SpinnerColumn(), TextColumn(f"[cyan]{fname}[/]"), transient=True) as prog:
                     prog.add_task("")
                     result = write_document(
-                        instruction=(
-                            f"Create a {ext.lstrip('.')} file named '{fname}' "
-                            f"with the following content:\n\n{content}"
-                        ),
+                        instruction=instruction,
                         output=out_path,
                         engine=engine,
-                        context=content,
+                        context=content if not is_xml else "",
                     )
                 size = result.stat().st_size
                 console.print(f"[green]✓[/] Written [cyan]{result}[/]  ({size:,} bytes)")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coding-agent"
-version = "2.0.6"
+version = "2.0.7"
 description = "Local AI coding agent — interactive chat, code review, and autonomous project builder (Ollama-powered)"
 requires-python = ">=3.9"
 dependencies = [
