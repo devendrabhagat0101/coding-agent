@@ -90,6 +90,51 @@ _PLAN_SYSTEM = textwrap.dedent("""\
     - For Java Spring Boot use: "" (no scaffold; generate build.gradle + src tree manually)
     - For Python use: "" (no scaffold; generate files manually)
 
+    ── Java Spring Boot file conventions ─────────────────────────────────────────
+    Spring Boot 3.3.x · Java 21 · Gradle (build.gradle + settings.gradle)
+
+    Standard directory structure (relative to the service output_dir):
+      build.gradle
+      settings.gradle
+      src/main/java/{pkg}/                       (e.g. com/dev2/payment)
+        {Name}Application.java                   @SpringBootApplication entry point
+        config/
+          OpenApiConfig.java                     springdoc OpenAPI bean
+        controller/
+          {Entity}Controller.java                @RestController, @RequestMapping("/api/{entity}")
+        service/
+          {Entity}Service.java                   @Service interface + Impl
+        repository/
+          {Entity}Repository.java                @Repository extends JpaRepository<{Entity}, Long>
+        model/
+          {Entity}.java                          @Entity, @Table, @Id, @GeneratedValue
+        dto/
+          {Entity}Request.java                   record or class with @Valid annotations
+          {Entity}Response.java                  record mapping entity → response
+          ApiResponse.java                       generic wrapper: success/error factory methods
+        exception/
+          ApiException.java                      extends RuntimeException + HttpStatus
+          GlobalExceptionHandler.java            @RestControllerAdvice @ExceptionHandler
+      src/main/resources/
+        application.yml                          server.port, spring.datasource, logging
+      src/test/java/{pkg}/
+        {Name}ApplicationTests.java              @SpringBootTest contextLoads()
+        controller/
+          {Entity}ControllerTest.java            @WebMvcTest with @MockBean
+
+    Key Spring Boot coding rules:
+    - Use records for DTOs (Java 16+) — immutable, concise.
+    - Return ResponseEntity<ApiResponse<T>> from all controllers.
+    - Annotate service interfaces, not just impls.
+    - Use @Valid on @RequestBody in controllers; validate in DTO with @NotNull/@Size.
+    - Always include GlobalExceptionHandler to avoid raw 500s.
+    - application.yml: set server.port, spring.application.name, datasource (if DB).
+    - H2 in-memory for dev (spring.h2.console.enabled=true).
+    - build.gradle dependencies: spring-boot-starter-web, actuator, validation,
+      data-jpa (if DB), h2/postgresql/mysql (runtime), springdoc-openapi (2.6.0).
+    - springdoc version: 2.6.0 (springdoc-openapi-starter-webmvc-ui).
+    - Spring Boot version: 3.3.5 · dependency-management: 1.1.6.
+
     JSON schema:
     {
       "project_name": "string",
